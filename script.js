@@ -113,6 +113,31 @@ async function savePedidoToSupabase(clienteId, repId) {
     return row;
 }
 
+async function fetchMixClienteFromSupabase(clienteId) {
+    const resp = await fetch(
+        `${SUPABASE_URL}/rest/v1/mix_cliente?cliente_id=eq.${clienteId}&select=categoria&order=criado_em`,
+        { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const rows = await resp.json();
+    return rows.map(r => r.categoria);
+}
+
+async function addMixCategoriasToSupabase(clienteId, categorias) {
+    const body = categorias.map(cat => ({ cliente_id: clienteId, categoria: cat }));
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/mix_cliente`, {
+        method: 'POST',
+        headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(body)
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+}
+
 async function saveRepToSupabase() {
     if (!repData?.id) return;
     const telefone = document.getElementById('repTelefone').value.trim();
@@ -1754,43 +1779,50 @@ function processCommand(cmd) {
 
     // ── F6 — Atualizar Mix de Categorias (Modo Cliente) ─────────
     if (lc.includes('cadastre') && lc.includes('categoria')) {
-        // Processar cadastro de categorias no formato: "Cadastre a categoria X e Y"
         if (currentMode !== 'cliente') { addMessage('assistant', '⚠️ Selecione um cliente para cadastrar categorias.'); return; }
 
-        // Extrair categorias do comando
         const categoriasPossiveis = ['Aves', 'Bovinos', 'Queijos', 'Embutidos', 'Pescados', 'Frios'];
-        const categoriasEncontradas = [];
-        categoriasPossiveis.forEach(cat => {
-            if (lc.includes(cat.toLowerCase())) {
-                categoriasEncontradas.push(cat);
-            }
-        });
+        const categoriasEncontradas = categoriasPossiveis.filter(cat => lc.includes(cat.toLowerCase()));
 
         if (categoriasEncontradas.length === 0) {
-            addMessage('assistant', '⚠️ Nenhuma categoria válida foi encontrada. Use o formato:\n"Cadastre a categoria [categoria 1] e [categoria 2]"\n\nCategorias disponíveis: Aves, Bovinos, Queijos, Embutidos, Pescados, Frios');
+            addMessage('assistant', '⚠️ Nenhuma categoria válida encontrada. Use:\n"Cadastre a categoria [cat1] e [cat2]"\n\nCategorias disponíveis: Aves, Bovinos, Queijos, Embutidos, Pescados, Frios');
             return;
         }
 
-        // Obter mix atual do localStorage
-        const mixKey = `mix_${selectedClient.id}`;
-        let mixAtual = JSON.parse(localStorage.getItem(mixKey)) || ['Aves', 'Queijos'];
-
-        // Adicionar apenas categorias novas (evitar duplicatas)
-        const novasCategorias = categoriasEncontradas.filter(c => !mixAtual.includes(c));
-        mixAtual = [...mixAtual, ...novasCategorias];
-
-        // Salvar mix atualizado no localStorage
-        localStorage.setItem(mixKey, JSON.stringify(mixAtual));
-
-        addMessage('assistant', `✅ Categorias cadastradas com sucesso!\n\n🏷️ Mix de Categorias — ${selectedClient.nome}\n\nCategorias cadastradas:\n${mixAtual.map(c => '• ' + c).join('\n')}\n\nO cliente agora está configurado para receber ofertas destas categorias.`, true);
+        const cId = selectedClient.id;
+        const nomeCliente = selectedClient.nome;
+        fetchMixClienteFromSupabase(cId)
+            .then(mixAtual => {
+                const novas = categoriasEncontradas.filter(c => !mixAtual.includes(c));
+                if (novas.length === 0) {
+                    addMessage('assistant', `ℹ️ Categorias já cadastradas para ${nomeCliente}:\n\n${mixAtual.map(c => '• ' + c).join('\n')}\n\nNenhuma categoria nova foi adicionada.`);
+                    return;
+                }
+                return addMixCategoriasToSupabase(cId, novas)
+                    .then(() => fetchMixClienteFromSupabase(cId))
+                    .then(mixFinal => {
+                        addMessage('assistant', `✅ Categorias cadastradas com sucesso!\n\n🏷️ Mix de Categorias — ${nomeCliente}\n\nCategorias cadastradas:\n${mixFinal.map(c => '• ' + c).join('\n')}\n\nO cliente agora está configurado para receber ofertas destas categorias.`, true);
+                    });
+            })
+            .catch(err => {
+                console.error('[F6 cadastre]', err);
+                addMessage('assistant', '⚠️ Falha ao cadastrar categorias. Verifique a conexão e tente novamente.');
+            });
         return;
     }
 
-    if (lc.includes('mix') || lc.includes('categoria') && lc.includes('atualizar')) {
-        if (currentMode !== 'cliente') { addMessage('assistant', '⚠️ Selecione um cliente para atualizar o mix de categorias.'); return; }
-        const mixKey = `mix_${selectedClient.id}`;
-        const mixAtual = JSON.parse(localStorage.getItem(mixKey)) || ['Aves', 'Queijos'];
-        addMessage('assistant', `🏷️ Mix de Categorias — ${selectedClient.nome}\n\nCategorias cadastradas:\n${mixAtual.map(c => '• ' + c).join('\n')}\n\nInforme o comando de voz ou texto: 'Cadastre a categoria [categoria 1] e [categoria 2]'\n\nCategorias disponíveis: Aves, Bovinos, Queijos, Embutidos, Pescados, Frios`);
+    if (lc.includes('mix') || (lc.includes('categoria') && lc.includes('atualizar'))) {
+        if (currentMode !== 'cliente') { addMessage('assistant', '⚠️ Selecione um cliente para ver o mix de categorias.'); return; }
+        const nomeCliente = selectedClient.nome;
+        fetchMixClienteFromSupabase(selectedClient.id)
+            .then(mix => {
+                const lista = mix.length ? mix.map(c => '• ' + c).join('\n') : '(nenhuma categoria cadastrada)';
+                addMessage('assistant', `🏷️ Mix de Categorias — ${nomeCliente}\n\nCategorias cadastradas:\n${lista}\n\nComando para adicionar: "Cadastre a categoria [cat1] e [cat2]"\n\nCategorias disponíveis: Aves, Bovinos, Queijos, Embutidos, Pescados, Frios`);
+            })
+            .catch(err => {
+                console.error('[F6 consulta]', err);
+                addMessage('assistant', '⚠️ Falha ao carregar mix de categorias. Verifique a conexão.');
+            });
         return;
     }
 
