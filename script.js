@@ -2031,39 +2031,97 @@ function badgeEstoque(status) {
     return '🔴';
 }
 
+// Palavras de comando/ligação que não fazem parte do termo de busca.
+const STOPWORDS_BUSCA = new Set([
+    'o','a','os','as','um','uma','uns','umas','de','do','da','dos','das','em','no','na','nos','nas',
+    'me','meu','minha','qual','quais','quanto','quantos','quanta','quantas','tem','temos','ha','tomar',
+    'mande','manda','mandar','envie','envia','enviar','mostre','mostra','mostrar','ver','veja','listar',
+    'lista','liste','consultar','consulta','consulte','estoque','produto','produtos','disponivel',
+    'disponiveis','catalogo','por','favor','e','com','quero','queria','saber','sobre','tem','existe',
+    'qual','que','os','das','dos','para','preco','precos','tabela','verificar','verifica','checar'
+]);
+
+function tokensBusca(lc) {
+    return stripAccents(lc)
+        .replace(/[^a-z0-9\s]/gi, ' ')
+        .split(/\s+/)
+        .map(t => t.trim())
+        .filter(t => t && !STOPWORDS_BUSCA.has(t));
+}
+
+// Normaliza categoria: minúscula, sem acento, sem "_". Os dados reais têm
+// duplicatas de caixa (bebidas/BEBIDAS) e acento (descartáveis) — normalizar
+// agrupa todas as variantes sob o mesmo nome.
+function normCat(c) {
+    return stripAccents((c || '').toLowerCase()).replace(/_/g, ' ').trim();
+}
+
+// Casa tokens com uma categoria (normalizada), tolerante a plural/singular,
+// acento e caixa. Escolhe a categoria que casa MAIS tokens (ex.: "bovinos
+// resfriados" vence "bovinos"). Retorna o nome normalizado ou null.
+function categoriaQueCasa(tokens) {
+    const cats = [...new Set(produtos.map(p => normCat(p.categoria)).filter(Boolean))];
+    // 1a) match exato do termo COMPLETO (cobre categorias multi-palavra, ex.: "bovinos resfriados")
+    const joined = tokens.join(' ');
+    const exatoFull = cats.find(cn => cn === joined || cn.replace(/s$/, '') === joined.replace(/s$/, ''));
+    if (exatoFull) return exatoFull;
+    // 1b) match exato de um token (singular/plural)
+    const exato = cats.find(cn => tokens.some(t => cn === t || cn.replace(/s$/, '') === t.replace(/s$/, '')));
+    if (exato) return exato;
+    // 2) melhor match por substring (mais tokens casados vence)
+    let best = null, bestScore = 0;
+    for (const cn of cats) {
+        let score = 0;
+        for (const t of tokens) if (t.length >= 3 && (cn.includes(t) || t.includes(cn))) score++;
+        if (score > bestScore) { bestScore = score; best = cn; }
+    }
+    return best;
+}
+
 function responderConsultaProdutos(lc) {
     if (!produtos.length) {
         addMessage('assistant', '⏳ Produtos ainda carregando. Aguarde um instante e tente novamente.');
         return;
     }
 
-    const termo = lc
-        .replace(/consultar estoque de?|estoque de?|buscar?|ver |mostrar |tem /g, '')
-        .replace(/\[produto ou categoria\]/g, '')
-        .trim();
+    const tokens = tokensBusca(lc);
+    let resultados, tituloFiltro = '';
 
-    const GENERICOS = ['produtos', 'estoque', 'todos', 'tudo', 'geral', ''];
-    const resultados = (!termo || GENERICOS.includes(termo))
-        ? produtos.slice(0, 5)
-        : produtos.filter(p =>
-            p.nome.toLowerCase().includes(termo) ||
-            (p.categoria || '').toLowerCase().includes(termo)
-          );
+    if (!tokens.length) {
+        // Consulta genérica: amostra do catálogo
+        resultados = produtos.slice(0, 10);
+    } else {
+        // 1) Tenta casar uma categoria inteira (ex.: "carnes", "bebidas", "aves")
+        const cat = categoriaQueCasa(tokens);
+        if (cat) {
+            resultados = produtos.filter(p => normCat(p.categoria) === cat);
+            tituloFiltro = ` — categoria: ${cat}`;
+        } else {
+            // 2) Casa pelo nome do produto (qualquer token presente no nome)
+            resultados = produtos.filter(p => {
+                const nome = stripAccents(p.nome.toLowerCase());
+                return tokens.some(t => nome.includes(t));
+            });
+        }
+    }
 
     if (!resultados.length) {
-        const cats = [...new Set(produtos.map(p => (p.categoria || '').toLowerCase()))].filter(Boolean).slice(0, 8).join(', ');
-        addMessage('assistant', `📦 Nenhum produto encontrado para "${termo}".\n\nCategorias disponíveis: ${cats}.`);
+        const cats = [...new Set(produtos.map(p => normCat(p.categoria)))].filter(Boolean).join(', ');
+        addMessage('assistant', `📦 Nenhum produto encontrado para "${tokens.join(' ')}".\n\nCategorias disponíveis: ${cats}.`);
         return;
     }
 
-    const linhas = resultados.map(p => {
+    const MAX = 15;
+    const exibidos = resultados.slice(0, MAX);
+    const linhas = exibidos.map(p => {
         const badge  = badgeEstoque(p.estoque_status);
         const precos = formatarPrecosProduto(p);
         return `${badge} ${p.nome}\n   ${precos}`;
     }).join('\n\n');
 
     const contexto = currentMode === 'cliente' ? ` — ${selectedClient.nome}` : '';
-    addMessage('assistant', `📦 Consulta de Estoque${contexto}\n\n${linhas}\n\n${resultados.length} produto(s) encontrado(s). Total no catálogo: ${produtos.length}.`);
+    const corte    = resultados.length > MAX ? `\n\n(mostrando ${MAX} de ${resultados.length})` : '';
+    addMessage('assistant', `📦 Consulta de Estoque${contexto}${tituloFiltro}\n\n${linhas}${corte}\n\n${resultados.length} produto(s) encontrado(s). Catálogo: ${produtos.length}.`);
 }
 
 function responderTabelaPrecos(lc) {
@@ -2071,10 +2129,35 @@ function responderTabelaPrecos(lc) {
         addMessage('assistant', '⏳ Produtos ainda carregando. Aguarde um instante e tente novamente.');
         return;
     }
+
+    const tokens = tokensBusca(lc);
+    let resultados, tituloFiltro = '';
+    if (!tokens.length) {
+        resultados = produtos.slice(0, 10);
+    } else {
+        const cat = categoriaQueCasa(tokens);
+        if (cat) {
+            resultados = produtos.filter(p => normCat(p.categoria) === cat);
+            tituloFiltro = ` — categoria: ${cat}`;
+        } else {
+            resultados = produtos.filter(p => {
+                const nome = stripAccents(p.nome.toLowerCase());
+                return tokens.some(t => nome.includes(t));
+            });
+        }
+    }
+    if (!resultados.length) {
+        const cats = [...new Set(produtos.map(p => normCat(p.categoria)))].filter(Boolean).join(', ');
+        addMessage('assistant', `💰 Nenhum produto encontrado para "${tokens.join(' ')}".\n\nCategorias disponíveis: ${cats}.`);
+        return;
+    }
+
     const contexto = currentMode === 'cliente' ? `\nCliente: ${selectedClient.nome} (preços padrão)` : '';
-    const amostra = produtos.slice(0, 8);
-    const linhas = amostra.map(p => `• ${p.nome}\n  ${formatarPrecosProduto(p)}`).join('\n\n');
-    addMessage('assistant', `💰 Tabela de Preços${contexto}\n\n${linhas}\n\n(Exibindo ${amostra.length} de ${produtos.length} produtos. Especifique a categoria para filtrar.)`);
+    const MAX = 15;
+    const exibidos = resultados.slice(0, MAX);
+    const linhas = exibidos.map(p => `• ${p.nome}\n  ${formatarPrecosProduto(p)}`).join('\n\n');
+    const corte = resultados.length > MAX ? `\n\n(mostrando ${MAX} de ${resultados.length})` : '';
+    addMessage('assistant', `💰 Tabela de Preços${contexto}${tituloFiltro}\n\n${linhas}${corte}\n\n${resultados.length} de ${produtos.length} produtos.`);
 }
 
 async function responderProspeccao(cmd) {
@@ -2321,8 +2404,16 @@ function detectarIntencaoEnvio(lc) {
     if (lc.includes('tabela') || lc.includes('preço') || lc.includes('preços')) return 'tabela_precos';
     if (lc.includes('followup') || lc.includes('follow up') || lc.includes('acompanhar')) return 'followup';
 
-    // Se tem verbo de envio mas não identificou tipo → personalizado
-    return 'personalizado';
+    // Consultas de catálogo/estoque NÃO são envio, mesmo com "mande/me mande".
+    // Ex.: "mande o estoque de bebidas" = consulta, não envio por WhatsApp.
+    if (/\b(estoque|produto|produtos|cat[aá]logo|pre[çc]o|pre[çc]os|tabela)\b/.test(lc) && !/\bpara\b/.test(lc)) {
+        return null;
+    }
+
+    // Verbo de envio sem tipo conhecido só vira "personalizado" se houver
+    // destinatário explícito ("para ..."). Sem destino, provavelmente é consulta.
+    if (/\bpara\b/.test(lc)) return 'personalizado';
+    return null;
 }
 
 // ── Handler principal de envio ───────────────────────────────────
