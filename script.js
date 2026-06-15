@@ -2446,8 +2446,8 @@ function setupVoiceRecognition() {
 
             if (!awaitingCommand) {
                 // ── Fase standby: aguardando "Commercia!" com variações fonéticas ──
-                // Detecta: "Commercia", "Comércia", "Comêrcia", "comercia", etc.
-                const hasWakeWord = /comé?rcia/i.test(lc) || /comê?rcia/i.test(lc);
+                // Detecta: "comercia", "comércia", "comêrcia", "commercia", etc.
+                const hasWakeWord = /comm?[eéê]rcia/i.test(lc);
                 if (hasWakeWord) {
                     awaitingCommand = true;
                     setVoicePhase('active');
@@ -2458,14 +2458,13 @@ function setupVoiceRecognition() {
                 if (!result.isFinal) {
                     // ── Interim: mostra preview do que está sendo reconhecido ──
                     const preview = transcript
-                        .replace(/^comé?rcia[!,]?\s*/i, '')
-                        .replace(/^comê?rcia[!,]?\s*/i, '')
+                        .replace(/^comm?[eéê]rcia[!,]?\s*/i, '')
                         .trim();
                     if (preview.length > 0) showInterimTranscript(preview);
                 } else {
                     // ── Fase active: primeiro resultado final = comando ─────
                     // Remove wake word (com variações fonéticas) se o usuário disse tudo na mesma frase
-                    const cmd = transcript.replace(/^comé?rcia[!,]?\s*/i, '').replace(/^comê?rcia[!,]?\s*/i, '').trim();
+                    const cmd = transcript.replace(/^comm?[eéê]rcia[!,]?\s*/i, '').trim();
                     if (cmd.length > 1) {
                         awaitingCommand = false;
                         removeInterimTranscript();
