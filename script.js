@@ -887,12 +887,57 @@ function safeStartRecognition() {
 function armAwaitingTimeout() {
     if (awaitingTimeout) clearTimeout(awaitingTimeout);
     awaitingTimeout = setTimeout(() => {
-        if (awaitingCommand) { awaitingCommand = false; setVoicePhase('standby'); }
+        if (awaitingCommand) { awaitingCommand = false; setVoicePhase('standby'); limparBufferComando(); }
         awaitingTimeout = null;
     }, 15000);
 }
 function clearAwaitingTimeout() {
     if (awaitingTimeout) { clearTimeout(awaitingTimeout); awaitingTimeout = null; }
+}
+
+// ── Acúmulo de comando (anti-truncamento do Android) ───────────────
+// O reconhecedor do Android finaliza cedo: "estoque de carnes" chega como
+// "estoque" e depois "de carnes". Em vez de processar no 1º resultado final,
+// juntamos os trechos e só processamos após ~900ms sem nova fala.
+let cmdBuffer = '';
+let cmdTimer  = null;
+const CMD_DEBOUNCE_MS = 900;
+
+function adicionarAoBufferComando(text) {
+    const t = (text || '').trim();
+    if (!t) return;
+    if (!cmdBuffer) { cmdBuffer = t; return; }
+    const a = cmdBuffer.toLowerCase(), b = t.toLowerCase();
+    if (b.includes(a)) cmdBuffer = t;                 // resultado cumulativo → substitui
+    else if (!a.includes(b)) cmdBuffer += ' ' + t;    // trecho novo → concatena
+    // (se já está contido, ignora)
+}
+
+function agendarProcessamentoComando() {
+    if (cmdTimer) clearTimeout(cmdTimer);
+    cmdTimer = setTimeout(processarBufferComando, CMD_DEBOUNCE_MS);
+}
+
+function limparBufferComando() {
+    if (cmdTimer) { clearTimeout(cmdTimer); cmdTimer = null; }
+    cmdBuffer = '';
+}
+
+function processarBufferComando() {
+    cmdTimer = null;
+    if (!awaitingCommand) { cmdBuffer = ''; return; }
+    const cmd = stripWakeWord(cmdBuffer);
+    cmdBuffer = '';
+    if (cmd.length > 1) {
+        awaitingCommand = false;
+        clearAwaitingTimeout();
+        removeInterimTranscript();
+        setVoicePhase('processing');
+        document.getElementById('messageInput').value = cmd;
+        sendMessage();
+        setTimeout(() => setVoicePhase('standby'), 400);
+    }
+    // Se só veio a wake word (cmd vazio), continua aguardando o comando.
 }
 
 let outputMode      = 'texto-voz';  // 'texto' | 'texto-voz' | 'voz'
@@ -2660,30 +2705,22 @@ function setupVoiceRecognition() {
                 const hasWakeWord = /comm?erci/i.test(norm);
                 if (hasWakeWord) {
                     awaitingCommand = true;
+                    limparBufferComando();   // começa um comando novo, limpo
                     armAwaitingTimeout();
                     setVoicePhase('active');
                     addMessage('assistant', '🎤 Sim! Pode falar o comando...', true);
                     speak('Sim');
                 }
             } else if (!ttsActive) {
+                // Acumula trechos e processa após pausa (~900ms). O Android finaliza
+                // cedo ("estoque" antes de "de carnes"); juntar evita o truncamento.
                 if (!result.isFinal) {
-                    // ── Interim: mostra preview do que está sendo reconhecido ──
-                    const preview = stripWakeWord(transcript);
+                    const preview = stripWakeWord((cmdBuffer + ' ' + transcript).trim());
                     if (preview.length > 0) showInterimTranscript(preview);
+                    agendarProcessamentoComando();   // estende a janela enquanto fala
                 } else {
-                    // ── Fase active: primeiro resultado final = comando ─────
-                    // Remove wake word (se o usuário disse tudo na mesma frase)
-                    const cmd = stripWakeWord(transcript);
-                    if (cmd.length > 1) {
-                        awaitingCommand = false;
-                        clearAwaitingTimeout();
-                        removeInterimTranscript();
-                        setVoicePhase('processing');
-                        document.getElementById('messageInput').value = cmd;
-                        sendMessage();
-                        setTimeout(() => setVoicePhase('standby'), 400);
-                    }
-                    // Se só veio a wake word sem comando, continua ouvindo
+                    adicionarAoBufferComando(transcript);
+                    agendarProcessamentoComando();
                 }
             }
         }
@@ -2759,6 +2796,7 @@ function toggleVoice() {
         // Desligar
         awaitingCommand = false;
         clearAwaitingTimeout();
+        limparBufferComando();
         setVoicePhase('off');                 // antes de stop(): impede o onend de reiniciar
         try { recognition.stop(); } catch(e) {}
         addMessage('assistant', '🔇 Modo voz desativado.', true);
