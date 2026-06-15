@@ -97,6 +97,22 @@ async function fetchProdutosFromSupabase() {
     }
 }
 
+async function savePedidoToSupabase(clienteId, repId) {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/pedidos`, {
+        method: 'POST',
+        headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({ cliente_id: clienteId, rep_id: repId, status: 'pre-pedido' })
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const [row] = await resp.json();
+    return row;
+}
+
 async function saveRepToSupabase() {
     if (!repData?.id) return;
     const telefone = document.getElementById('repTelefone').value.trim();
@@ -1716,7 +1732,16 @@ function processCommand(cmd) {
     // ── F4 — Registro de Pedido por Voz (Modo Cliente) ─────────────
     if (lc.includes('registrar pedido') || lc.includes('criar pedido') || (lc.includes('pedido') && (lc.includes('cx') || lc.includes('caixa')))) {
         if (currentMode !== 'cliente') { addMessage('assistant', '⚠️ Selecione um cliente para registrar um pedido.'); return; }
-        addMessage('assistant', `📝 Pedido registrado para ${selectedClient.nome}\n\nResumo:\n• Itens: conforme solicitado\n• Status: Aguardando confirmação\n\n⚠️ Revise o pedido e confirme antes de enviar ao sistema.`);
+        if (!repData?.id) { addMessage('assistant', '⚠️ Rep não carregado. Recarregue a página e tente novamente.'); return; }
+        savePedidoToSupabase(selectedClient.id, repData.id)
+            .then(row => {
+                const shortId = row.id.slice(0, 8).toUpperCase();
+                addMessage('assistant', `✅ Pré-pedido #${shortId} salvo!\n\nCliente: ${selectedClient.nome}\nStatus: Pré-pedido\nData: ${new Date().toLocaleDateString('pt-BR')}\n\n📌 Itens não vinculados nesta versão — confirme com o cliente antes de enviar.`);
+            })
+            .catch(err => {
+                console.error('[F4]', err);
+                addMessage('assistant', `⚠️ Falha ao salvar pedido. Verifique a conexão e tente novamente.`);
+            });
         return;
     }
 
