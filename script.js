@@ -2606,7 +2606,7 @@ function removeInterimTranscript() {
 // praticamente exclusivo — um segundo stream rouba o áudio do
 // SpeechRecognition e causa "nomatch". Apenas observamos os eventos.
 let voiceLogLines = [];
-const VOICE_DEBUG = true;    // true = mostra painel preto de diagnóstico
+const VOICE_DEBUG = false;   // true = mostra painel preto de diagnóstico
 
 function renderVoiceDebug() {
     if (!VOICE_DEBUG) return;
