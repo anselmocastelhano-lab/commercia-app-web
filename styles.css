@@ -1278,9 +1278,9 @@ body {
     .ctx-nome { font-size: 13px; }
     .ctx-detalhes { font-size: 11px; }
 
-    /* ── Messages wider ── */
+    /* ── Messages wider — padding-bottom reserva espaço do input fixo ── */
     .messages {
-        padding: 10px 8px;
+        padding: 10px 8px calc(72px + env(safe-area-inset-bottom, 0px)) 8px;
     }
     .message {
         max-width: 92%;
@@ -1288,8 +1288,13 @@ body {
         font-size: 13px;
     }
 
-    /* ── Input area compact ── */
+    /* ── Input area: fixo na base do viewport, imune a resize do browser ── */
     .input-area {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 50;
         padding: 8px;
         padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
         gap: 6px;
