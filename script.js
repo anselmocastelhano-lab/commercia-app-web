@@ -854,6 +854,30 @@ function ttsOn(text) {
     const maxMs  = Math.min(2000 + chars * 80, 30000); // estimativa de duração da fala + folga
     ttsWatchdog  = setTimeout(() => { ttsActive = false; ttsWatchdog = null; }, maxMs);
 }
+
+let recognitionRunning = false;     // espelha onstart/onend — evita start() duplicado (InvalidStateError)
+let awaitingTimeout    = null;      // se nenhum comando vier após a wake word, volta para standby
+
+// Reinicia o reconhecedor SEM nunca lançar InvalidStateError por start duplo.
+function safeStartRecognition() {
+    if (!recognition || recognitionRunning || voicePhase === 'off') return;
+    try { recognition.start(); } catch (err) { /* já está iniciando */ }
+}
+
+// O navegador encerra o reconhecimento após pausas mesmo em continuous. Se isso
+// acontecer logo após a wake word, não podemos perder o estado "aguardando comando".
+// Em vez disso, damos uma janela limitada antes de voltar ao standby.
+function armAwaitingTimeout() {
+    if (awaitingTimeout) clearTimeout(awaitingTimeout);
+    awaitingTimeout = setTimeout(() => {
+        if (awaitingCommand) { awaitingCommand = false; setVoicePhase('standby'); }
+        awaitingTimeout = null;
+    }, 15000);
+}
+function clearAwaitingTimeout() {
+    if (awaitingTimeout) { clearTimeout(awaitingTimeout); awaitingTimeout = null; }
+}
+
 let outputMode      = 'texto-voz';  // 'texto' | 'texto-voz' | 'voz'
 let ttsVoice       = null;
 let messageHistory  = {};           // { 'geral': [...], clientId: [...] }
@@ -2458,10 +2482,12 @@ function setupVoiceRecognition() {
 
             if (!awaitingCommand) {
                 // ── Fase standby: aguardando "Commercia!" com variações fonéticas ──
-                // Detecta: "comercia", "comércia", "comêrcia", "commercia", etc.
-                const hasWakeWord = /comm?[eéê]rcia/i.test(lc);
+                // Chrome transcreve o nome inventado de formas diversas: comercia,
+                // comércia, comércio, comercial, commercia. Casamos pelo radical.
+                const hasWakeWord = /comm?[eéê]rci/i.test(lc);
                 if (hasWakeWord) {
                     awaitingCommand = true;
+                    armAwaitingTimeout();
                     setVoicePhase('active');
                     addMessage('assistant', '🎤 Sim! Pode falar o comando...', true);
                     speak('Sim');
@@ -2469,16 +2495,15 @@ function setupVoiceRecognition() {
             } else if (!ttsActive) {
                 if (!result.isFinal) {
                     // ── Interim: mostra preview do que está sendo reconhecido ──
-                    const preview = transcript
-                        .replace(/^comm?[eéê]rcia[!,]?\s*/i, '')
-                        .trim();
+                    const preview = transcript.replace(/^comm?[eéê]rci\w*[!,.]?\s*/i, '').trim();
                     if (preview.length > 0) showInterimTranscript(preview);
                 } else {
                     // ── Fase active: primeiro resultado final = comando ─────
                     // Remove wake word (com variações fonéticas) se o usuário disse tudo na mesma frase
-                    const cmd = transcript.replace(/^comm?[eéê]rcia[!,]?\s*/i, '').trim();
+                    const cmd = transcript.replace(/^comm?[eéê]rci\w*[!,.]?\s*/i, '').trim();
                     if (cmd.length > 1) {
                         awaitingCommand = false;
+                        clearAwaitingTimeout();
                         removeInterimTranscript();
                         setVoicePhase('processing');
                         document.getElementById('messageInput').value = cmd;
@@ -2491,20 +2516,21 @@ function setupVoiceRecognition() {
         }
     };
 
+    recognition.onstart = () => { recognitionRunning = true; };
+
     recognition.onend = () => {
-        // Browser para após silêncio prolongado — reinicia se ainda ativo
-        awaitingCommand = false;
-        if (voicePhase === 'standby' || voicePhase === 'active') {
-            setVoicePhase('standby');
-            setTimeout(() => {
-                if (voicePhase !== 'off') {
-                    try { recognition.start(); } catch(err) {}
-                }
-            }, 250);
+        recognitionRunning = false;
+        // CRÍTICO: o navegador encerra o reconhecimento sozinho após pausas, mesmo
+        // em continuous — inclusive logo após o "Sim", antes do usuário falar o
+        // comando. NÃO resetamos awaitingCommand nem a fase aqui: isso descartaria
+        // o comando em andamento. Apenas reiniciamos para manter a escuta viva.
+        if (voicePhase !== 'off') {
+            setTimeout(safeStartRecognition, 250);
         }
     };
 
     recognition.onerror = (event) => {
+        recognitionRunning = false;
         if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
             if (location.protocol === 'file:') {
                 addMessage('assistant',
@@ -2518,14 +2544,14 @@ function setupVoiceRecognition() {
                 addMessage('assistant', '⚠️ Permissão de microfone negada. Permita acesso ao microfone nas configurações do browser e recarregue a página.');
             }
             setVoicePhase('off');
+            clearAwaitingTimeout();
             return;
         }
-        awaitingCommand = false;
-        // Erros transientes (no-speech, aborted, network) — reinicia
+        // Erros transientes (no-speech, aborted, network): NÃO resetamos
+        // awaitingCommand para não perder o comando. onend dispara em seguida
+        // e reinicia; este é só um fallback caso onend não venha.
         if (voicePhase !== 'off') {
-            setTimeout(() => {
-                try { recognition.start(); } catch(err) {}
-            }, 400);
+            setTimeout(safeStartRecognition, 500);
         }
     };
 }
@@ -2541,14 +2567,18 @@ function toggleVoice() {
             recognition.start();
             addMessage('assistant', '🎤 Modo voz ativado', true);
         } catch(e) {
-            addMessage('assistant', '⚠️ Não foi possível acessar o microfone. Verifique as permissões do browser.');
-            setVoicePhase('off');
+            // InvalidStateError = já estava rodando; nesse caso seguimos em standby
+            if (e && e.name !== 'InvalidStateError') {
+                addMessage('assistant', '⚠️ Não foi possível acessar o microfone. Verifique as permissões do browser.');
+                setVoicePhase('off');
+            }
         }
     } else {
         // Desligar
         awaitingCommand = false;
+        clearAwaitingTimeout();
+        setVoicePhase('off');                 // antes de stop(): impede o onend de reiniciar
         try { recognition.stop(); } catch(e) {}
-        setVoicePhase('off');
         addMessage('assistant', '🔇 Modo voz desativado.', true);
     }
 }
