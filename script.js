@@ -843,16 +843,33 @@ let awaitingCommand = false;        // true após wake word — aguardando coman
 let ttsActive       = false;        // true enquanto TTS fala — bloqueia eco do microfone
 let currentAudio    = null;         // elemento Audio ativo do Google TTS
 let ttsWatchdog     = null;         // timer de segurança: garante que ttsActive nunca trave em true
+let pausedForTts    = false;        // reconhecimento pausado enquanto a Commercia fala (anti-eco)
 
-// Liga ttsActive e arma um watchdog que SEMPRE devolve o flag para false,
-// mesmo se audio.onended/onerror falharem (comum em mobile / áudio interrompido).
-// Sem isso, um onended perdido trava o reconhecimento de comandos para sempre.
+// Liga ttsActive e PAUSA o reconhecimento: enquanto a Commercia fala, o microfone
+// não pode ouvir a própria voz dela (eco) — isso saturava o reconhecedor e fazia
+// os comandos seguintes se perderem. Arma também um watchdog que SEMPRE devolve o
+// flag para false, mesmo se audio.onended/onerror falharem (comum em mobile).
 function ttsOn(text) {
-    ttsActive = true;
+    ttsActive    = true;
+    pausedForTts = true;
+    if (typeof recognition !== 'undefined' && recognition) {
+        try { recognition.stop(); } catch (e) {}   // para de ouvir durante a fala
+    }
     if (ttsWatchdog) clearTimeout(ttsWatchdog);
     const chars  = (text || '').length;
     const maxMs  = Math.min(2000 + chars * 80, 30000); // estimativa de duração da fala + folga
-    ttsWatchdog  = setTimeout(() => { ttsActive = false; ttsWatchdog = null; }, maxMs);
+    ttsWatchdog  = setTimeout(ttsOff, maxMs);
+}
+
+// Desliga o TTS e RETOMA o reconhecimento. Ponto único de saída do estado "falando":
+// chamado por audio.onended/onerror, pelo watchdog e por stopAudio.
+function ttsOff() {
+    ttsActive = false;
+    if (ttsWatchdog) { clearTimeout(ttsWatchdog); ttsWatchdog = null; }
+    pausedForTts = false;
+    if (typeof voicePhase !== 'undefined' && voicePhase !== 'off') {
+        setTimeout(safeStartRecognition, 200);   // volta a ouvir a wake word/comando
+    }
 }
 
 let recognitionRunning = false;     // espelha onstart/onend — evita start() duplicado (InvalidStateError)
@@ -860,7 +877,7 @@ let awaitingTimeout    = null;      // se nenhum comando vier após a wake word,
 
 // Reinicia o reconhecedor SEM nunca lançar InvalidStateError por start duplo.
 function safeStartRecognition() {
-    if (!recognition || recognitionRunning || voicePhase === 'off') return;
+    if (!recognition || recognitionRunning || voicePhase === 'off' || pausedForTts) return;
     try { recognition.start(); } catch (err) { /* já está iniciando */ }
 }
 
@@ -897,7 +914,7 @@ const NOVO_CLIENTE_CAMPOS = [
 function stopAudio() {
     if (currentAudio) { currentAudio.pause(); currentAudio = null; }
     if (window.speechSynthesis) window.speechSynthesis.cancel();
-    ttsActive = false;
+    ttsOff();
 }
 
 // ── INIT ──────────────────────────────────────────────────────────
@@ -1293,13 +1310,12 @@ function addMessage(type, text, noSpeak = false) {
             .then(({ audioContent }) => {
                 const audio = new Audio(`data:audio/mp3;base64,${audioContent}`);
                 currentAudio = audio;
-                audio.onended = () => { currentAudio = null; setTimeout(() => { ttsActive = false; }, 300); };
-                audio.onerror = () => { currentAudio = null; ttsActive = false; speakFallback(cleanText); };
-                audio.play().catch(err => { console.error('play error:', err); ttsActive = false; });
+                audio.onended = () => { currentAudio = null; setTimeout(ttsOff, 300); };
+                audio.onerror = () => { currentAudio = null; speakFallback(cleanText); };
+                audio.play().catch(err => { console.error('play error:', err); ttsOff(); });
             })
             .catch(err => {
                 console.error('Google TTS erro:', err.message);
-                ttsActive = false;
                 speakFallback(cleanText);
             });
     }
@@ -2617,12 +2633,13 @@ function setupVoiceRecognition() {
 
     recognition.onend = () => {
         recognitionRunning = false;
-        voiceLog('■ onend' + (voicePhase !== 'off' ? ' → reinicia' : ''));
+        const vaiReiniciar = voicePhase !== 'off' && !pausedForTts;
+        voiceLog('■ onend' + (vaiReiniciar ? ' → reinicia' : (pausedForTts ? ' (pausado p/ fala)' : '')));
         // CRÍTICO: o navegador encerra o reconhecimento sozinho após pausas, mesmo
-        // em continuous — inclusive logo após o "Sim", antes do usuário falar o
-        // comando. NÃO resetamos awaitingCommand nem a fase aqui: isso descartaria
-        // o comando em andamento. Apenas reiniciamos para manter a escuta viva.
-        if (voicePhase !== 'off') {
+        // em continuous. NÃO resetamos awaitingCommand nem a fase aqui: isso
+        // descartaria o comando em andamento. Só reiniciamos se NÃO estamos no
+        // meio de uma fala da Commercia (pausedForTts) — nesse caso o ttsOff retoma.
+        if (vaiReiniciar) {
             setTimeout(safeStartRecognition, 250);
         }
     };
@@ -2878,25 +2895,24 @@ async function speak(text) {
         const { audioContent } = await resp.json();
         const audio = new Audio(`data:audio/mp3;base64,${audioContent}`);
         currentAudio = audio;
-        audio.onended = () => { currentAudio = null; setTimeout(() => { ttsActive = false; }, 300); };
-        audio.onerror = () => { currentAudio = null; ttsActive = false; speakFallback(clean); };
-        audio.play().catch(err => { console.error('play error:', err); ttsActive = false; });
+        audio.onended = () => { currentAudio = null; setTimeout(ttsOff, 300); };
+        audio.onerror = () => { currentAudio = null; speakFallback(clean); };
+        audio.play().catch(err => { console.error('play error:', err); ttsOff(); });
     } catch (err) {
         console.error('Google TTS erro:', err.message);
-        ttsActive = false;
         speakFallback(clean);
     }
 }
 
 function speakFallback(clean) {
-    if (!window.speechSynthesis) return;
+    if (!window.speechSynthesis) { ttsOff(); return; }
     ttsOn(clean);
     const utterance  = new SpeechSynthesisUtterance(clean);
     utterance.lang   = 'pt-BR';
     utterance.rate   = 1.2;
     utterance.pitch  = 1.15;
     if (ttsVoice) utterance.voice = ttsVoice;
-    utterance.onend = () => { setTimeout(() => { ttsActive = false; }, 300); };
+    utterance.onend = () => { setTimeout(ttsOff, 300); };
     window.speechSynthesis.speak(utterance);
 }
 
