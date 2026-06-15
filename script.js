@@ -842,6 +842,18 @@ let recognition     = null;         // único reconhecedor contínuo (wake + cmd
 let awaitingCommand = false;        // true após wake word — aguardando comando
 let ttsActive       = false;        // true enquanto TTS fala — bloqueia eco do microfone
 let currentAudio    = null;         // elemento Audio ativo do Google TTS
+let ttsWatchdog     = null;         // timer de segurança: garante que ttsActive nunca trave em true
+
+// Liga ttsActive e arma um watchdog que SEMPRE devolve o flag para false,
+// mesmo se audio.onended/onerror falharem (comum em mobile / áudio interrompido).
+// Sem isso, um onended perdido trava o reconhecimento de comandos para sempre.
+function ttsOn(text) {
+    ttsActive = true;
+    if (ttsWatchdog) clearTimeout(ttsWatchdog);
+    const chars  = (text || '').length;
+    const maxMs  = Math.min(2000 + chars * 80, 30000); // estimativa de duração da fala + folga
+    ttsWatchdog  = setTimeout(() => { ttsActive = false; ttsWatchdog = null; }, maxMs);
+}
 let outputMode      = 'texto-voz';  // 'texto' | 'texto-voz' | 'voz'
 let ttsVoice       = null;
 let messageHistory  = {};           // { 'geral': [...], clientId: [...] }
@@ -1203,7 +1215,7 @@ function addMessage(type, text, noSpeak = false) {
         cleanText = preprocessForSpeech(text);
         if (cleanText) {
             stopAudio();
-            ttsActive = true;
+            ttsOn(cleanText);
             fetchPromise = fetch(
                 `https://texttospeech.googleapis.com/v1/text:synthesize?key=${GOOGLE_TTS_KEY}`,
                 {
@@ -2716,7 +2728,7 @@ async function speak(text) {
     stopAudio();
     const clean = preprocessForSpeech(text);
     if (!clean) return;
-    ttsActive = true;
+    ttsOn(clean);
     try {
         const resp = await fetch(
             `https://texttospeech.googleapis.com/v1/text:synthesize?key=${GOOGLE_TTS_KEY}`,
@@ -2746,7 +2758,7 @@ async function speak(text) {
 
 function speakFallback(clean) {
     if (!window.speechSynthesis) return;
-    ttsActive = true;
+    ttsOn(clean);
     const utterance  = new SpeechSynthesisUtterance(clean);
     utterance.lang   = 'pt-BR';
     utterance.rate   = 1.2;
