@@ -2484,19 +2484,26 @@ function removeInterimTranscript() {
 // ── DIAGNÓSTICO: mostra exatamente o que o microfone está captando ──
 // Visível em todas as fases. Ajuda a descobrir como o Chrome transcreve
 // "Comércia". Remover quando o reconhecimento estiver estável.
-function showDebugHeard(raw, isFinal) {
+let voiceLogLines = [];
+function voiceLog(msg) {
     let el = document.getElementById('voiceDebug');
     if (!el) {
         el = document.createElement('div');
         el.id = 'voiceDebug';
-        el.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:9999;' +
-            'background:rgba(0,0,0,.85);color:#0ff;font:12px monospace;padding:6px 10px;' +
-            'border-radius:8px;white-space:pre-wrap;pointer-events:none;';
+        el.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;' +
+            'background:rgba(0,0,0,.9);color:#0ff;font:12px monospace;padding:6px 10px;' +
+            'border-radius:8px;white-space:pre-wrap;pointer-events:none;max-height:40vh;overflow:hidden;';
         document.body.appendChild(el);
     }
+    const t = new Date().toLocaleTimeString('pt-BR', { hour12: false });
+    voiceLogLines.push(`${t} ${msg}`);
+    if (voiceLogLines.length > 8) voiceLogLines.shift();
     const fase = (typeof voicePhase !== 'undefined') ? voicePhase : '?';
-    const flag = isFinal ? 'FINAL' : 'interim';
-    el.textContent = `🎤 [${fase}] tts=${ttsActive} aguardando=${awaitingCommand}\n${flag}: "${raw}"`;
+    el.textContent = `[${fase}] tts=${ttsActive} aguard=${awaitingCommand} run=${recognitionRunning}\n` +
+        voiceLogLines.join('\n');
+}
+function showDebugHeard(raw, isFinal) {
+    voiceLog(`${isFinal ? 'FINAL' : 'interim'}: "${raw}"`);
 }
 
 function setupVoiceRecognition() {
@@ -2553,10 +2560,16 @@ function setupVoiceRecognition() {
         }
     };
 
-    recognition.onstart = () => { recognitionRunning = true; };
+    recognition.onstart = () => { recognitionRunning = true; voiceLog('▶ onstart'); };
+
+    recognition.onaudiostart  = () => voiceLog('🎙 audiostart (capturando)');
+    recognition.onspeechstart = () => voiceLog('🗣 speechstart (voz detectada)');
+    recognition.onspeechend   = () => voiceLog('… speechend');
+    recognition.onnomatch     = () => voiceLog('? nomatch');
 
     recognition.onend = () => {
         recognitionRunning = false;
+        voiceLog('■ onend' + (voicePhase !== 'off' ? ' → reinicia' : ''));
         // CRÍTICO: o navegador encerra o reconhecimento sozinho após pausas, mesmo
         // em continuous — inclusive logo após o "Sim", antes do usuário falar o
         // comando. NÃO resetamos awaitingCommand nem a fase aqui: isso descartaria
@@ -2568,6 +2581,7 @@ function setupVoiceRecognition() {
 
     recognition.onerror = (event) => {
         recognitionRunning = false;
+        voiceLog('✖ onerror: ' + event.error);
         if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
             if (location.protocol === 'file:') {
                 addMessage('assistant',
@@ -2600,6 +2614,7 @@ function toggleVoice() {
     }
     if (voicePhase === 'off') {
         setVoicePhase('standby');
+        voiceLog('toggle ON — chamando start()');
         try {
             recognition.start();
             addMessage('assistant', '🎤 Modo voz ativado', true);
