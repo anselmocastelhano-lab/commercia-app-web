@@ -1749,8 +1749,8 @@ function processCommand(cmd) {
     }
 
     // ── F15 — Ofertas do Dia (Todas as Categorias - Modo REP) ──────
-    // PRIORIDADE ALTA: Verificar antes de F1/F2 para não capturar "produto" genérico
-    if (lc.includes('oferta') || lc.includes('ave') || lc.includes('promoção')) {
+    // Só "oferta"/"promoção" — NÃO casar "ave" solto (sequestrava "aves").
+    if (lc.includes('oferta') || lc.includes('promoç')) {
         const ofertas = [
             { nome: 'Frango Inteiro 1kg',    estoque: 240, preco_un: 12.90, desconto: 15, categoria: '🐔 Aves' },
             { nome: 'Coxa e Sobrecoxa 1kg',  estoque: 180, preco_un: 10.50, desconto: 15, categoria: '🐔 Aves' },
@@ -1780,12 +1780,15 @@ function processCommand(cmd) {
     }
 
     // ── F1 / F2 — Consulta de Produtos/Preços (Ambos os Modos) ────
-    if (lc.includes('consultar estoque') || lc.includes('estoque de') || lc.includes('tem ') && lc.includes('disponív') ||
-        lc.includes('produto') || lc.includes('produtos')) {
+    // Aceita "estoque" puro (Android trunca "estoque de carnes" → "estoque"),
+    // "produto(s)", "disponível" e nomes de categoria soltos ("carnes", "aves").
+    if (lc.includes('estoque') || lc.includes('produto') || lc.includes('disponív') ||
+        lc.includes('catálogo') || lc.includes('catalogo') || ehConsultaPorCategoria(lc)) {
         responderConsultaProdutos(lc);
         return;
     }
-    if (lc.includes('tabela de preço') || lc.includes('preço de') || lc.includes('quanto custa') || lc.includes('ver preços')) {
+    if (lc.includes('tabela de preço') || lc.includes('tabela de preços') || lc.includes('preço de') ||
+        lc.includes('preços de') || lc.includes('quanto custa') || lc.includes('ver preços') || lc === 'preço' || lc === 'preços') {
         responderTabelaPrecos(lc);
         return;
     }
@@ -2076,6 +2079,16 @@ function categoriaQueCasa(tokens) {
         if (score > bestScore) { bestScore = score; best = cn; }
     }
     return best;
+}
+
+// Decide se um comando curto e "solto" é uma consulta por categoria
+// (ex.: "carnes", "aves", "bovinos resfriados"). Guarda contra outros
+// intents que contêm nome de categoria (ex.: "cadastre a categoria aves").
+function ehConsultaPorCategoria(lc) {
+    if (!produtos.length) return false;
+    if (/cadastr|agend|registr|propost|reposi|an[aá]lise|rota|hist[oó]ri|visita|lead|cliente|enrole|mix/.test(lc)) return false;
+    const tokens = tokensBusca(lc);
+    return tokens.length >= 1 && tokens.length <= 2 && categoriaQueCasa(tokens) !== null;
 }
 
 function responderConsultaProdutos(lc) {
@@ -2593,7 +2606,7 @@ function removeInterimTranscript() {
 // praticamente exclusivo — um segundo stream rouba o áudio do
 // SpeechRecognition e causa "nomatch". Apenas observamos os eventos.
 let voiceLogLines = [];
-const VOICE_DEBUG = false;   // true = mostra painel preto de diagnóstico
+const VOICE_DEBUG = true;    // true = mostra painel preto de diagnóstico
 
 function renderVoiceDebug() {
     if (!VOICE_DEBUG) return;
