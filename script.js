@@ -82,6 +82,21 @@ async function fetchRepFromSupabase() {
     }
 }
 
+async function fetchProdutosFromSupabase() {
+    try {
+        const resp = await fetch(
+            `${SUPABASE_URL}/rest/v1/produtos?select=id,codigo,nome,categoria,unidade_venda,preco_cx,preco_kg,preco_pct,preco_un,preco_fd,estoque_status,ativo&ativo=eq.true&order=categoria,nome`,
+            { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
+        );
+        if (!resp.ok) { console.error('[fetchProdutos] HTTP', resp.status); return; }
+        const rows = await resp.json();
+        produtos = rows;
+        console.log(`[fetchProdutos] ${produtos.length} produtos carregados`);
+    } catch (e) {
+        console.error('[fetchProdutos]', e);
+    }
+}
+
 async function saveRepToSupabase() {
     if (!repData?.id) return;
     const telefone = document.getElementById('repTelefone').value.trim();
@@ -764,18 +779,7 @@ let clientes = [
     { id: 5, nome: 'Buffet Sabores',            contato: 'Roberto Costa',  endereco: 'Av. Osvaldo Aranha, 440', bairro: 'Bom Fim', cidade: 'Porto Alegre', estado: 'RS', cep: '90035-190', status: 'active' },
 ];
 
-const mockProdutos = [
-    { nome: 'Frango Inteiro 1kg',      categoria: 'aves',      estoque: 240,  preco_un: 12.90, preco_cx: 154.80,  cx: '12un', status: 'Disponível'   },
-    { nome: 'Coxa e Sobrecoxa 1kg',    categoria: 'aves',      estoque: 180,  preco_un: 10.50, preco_cx: 126.00,  cx: '12un', status: 'Disponível'   },
-    { nome: 'Filé de Frango 1kg',      categoria: 'aves',      estoque: 15,   preco_un: 18.90, preco_cx: 226.80,  cx: '12un', status: 'Estoque Baixo'},
-    { nome: 'Picanha 1kg',             categoria: 'bovinos',   estoque: 95,   preco_un: 65.00, preco_cx: 390.00,  cx: '6un',  status: 'Disponível'   },
-    { nome: 'Contrafilé 1kg',          categoria: 'bovinos',   estoque: 110,  preco_un: 48.00, preco_cx: 288.00,  cx: '6un',  status: 'Disponível'   },
-    { nome: 'Carne Moída 1kg',         categoria: 'bovinos',   estoque: 0,    preco_un: 28.50, preco_cx: 171.00,  cx: '6un',  status: 'Indisponível' },
-    { nome: 'Costela Suína 1kg',       categoria: 'suinos',    estoque: 88,   preco_un: 22.00, preco_cx: 132.00,  cx: '6un',  status: 'Disponível'   },
-    { nome: 'Queijo Mussarela 1kg',    categoria: 'queijos',   estoque: 52,   preco_un: 32.00, preco_cx: 192.00,  cx: '6un',  status: 'Disponível'   },
-    { nome: 'Linguiça Toscana 1kg',    categoria: 'embutidos', estoque: 67,   preco_un: 19.90, preco_cx: 119.40,  cx: '6un',  status: 'Disponível'   },
-    { nome: 'Salmão em Posta 1kg',     categoria: 'pescados',  estoque: 8,    preco_un: 78.00, preco_cx: 312.00,  cx: '4un',  status: 'Estoque Baixo'},
-];
+let produtos = []; // Carregado do Supabase em DOMContentLoaded
 
 const mockHistorico = {
     1: [ { data: '08/05', pedido: 'P-2041', valor: 'R$ 3.200', itens: 'Frango Inteiro 50cx, Coxa 20cx' },
@@ -829,6 +833,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     repData = await fetchRepFromSupabase();
+    await fetchProdutosFromSupabase();
     const leadsSupabase = await fetchLeadsFromSupabase();
     if (leadsSupabase) leads = leadsSupabase;
     renderClientList();
@@ -1883,7 +1888,7 @@ function processCommand(cmd) {
 
     // ── F16 — Inbound WhatsApp (Modo REP) ────────────────────────
     if (lc.includes('mensagem recebida') || lc.includes('inbound') || lc.includes('responder whatsapp')) {
-        addMessage('assistant', `⚠️ F16 — Recepção WhatsApp Inbound\n\nEsta funcionalidade está bloqueada: o endpoint /webhook/whatsapp ainda não foi implementado no backend. Previsão: disponível em breve.`);
+        addMessage('assistant', `📲 F16 — WhatsApp Inbound\n\nO webhook de recebimento está ativo no backend. Mensagens enviadas pelos clientes ao número do rep são processadas automaticamente.\n\nA visualização das mensagens recebidas dentro do app está em desenvolvimento e será disponibilizada em breve.`);
         return;
     }
 
@@ -1901,34 +1906,66 @@ function processCommand(cmd) {
 
 // ── HELPERS ──────────────────────────────────────────────────────
 
+function formatarPrecosProduto(p) {
+    const itens = [];
+    if (p.preco_cx  != null) itens.push(`R$ ${parseFloat(p.preco_cx).toFixed(2)}/cx`);
+    if (p.preco_kg  != null) itens.push(`R$ ${parseFloat(p.preco_kg).toFixed(2)}/kg`);
+    if (p.preco_pct != null) itens.push(`R$ ${parseFloat(p.preco_pct).toFixed(2)}/pct`);
+    if (p.preco_un  != null) itens.push(`R$ ${parseFloat(p.preco_un).toFixed(2)}/un`);
+    if (p.preco_fd  != null) itens.push(`R$ ${parseFloat(p.preco_fd).toFixed(2)}/fd`);
+    return itens.length ? itens.join(' · ') : 'Preço sob consulta';
+}
+
+function badgeEstoque(status) {
+    if (status === 'disponivel') return '✅';
+    if (status === 'consultar')  return '⚠️';
+    return '🔴';
+}
+
 function responderConsultaProdutos(lc) {
-    const termo = lc.replace(/consultar estoque de?|estoque de?|buscar?|ver |mostrar |tem /g, '').replace(/\[produto ou categoria\]/g, '').trim();
-    // Termos genéricos que não filtram — mostram os primeiros 5 produtos
+    if (!produtos.length) {
+        addMessage('assistant', '⏳ Produtos ainda carregando. Aguarde um instante e tente novamente.');
+        return;
+    }
+
+    const termo = lc
+        .replace(/consultar estoque de?|estoque de?|buscar?|ver |mostrar |tem /g, '')
+        .replace(/\[produto ou categoria\]/g, '')
+        .trim();
+
     const GENERICOS = ['produtos', 'estoque', 'todos', 'tudo', 'geral', ''];
     const resultados = (!termo || GENERICOS.includes(termo))
-        ? mockProdutos.slice(0, 5)
-        : mockProdutos.filter(p => p.nome.toLowerCase().includes(termo) || p.categoria.toLowerCase().includes(termo));
+        ? produtos.slice(0, 5)
+        : produtos.filter(p =>
+            p.nome.toLowerCase().includes(termo) ||
+            (p.categoria || '').toLowerCase().includes(termo)
+          );
 
     if (!resultados.length) {
-        addMessage('assistant', `📦 Nenhum produto encontrado para "${termo}".\n\nCategorias disponíveis: aves, bovinos, suínos, queijos, embutidos, pescados.`);
+        const cats = [...new Set(produtos.map(p => (p.categoria || '').toLowerCase()))].filter(Boolean).slice(0, 8).join(', ');
+        addMessage('assistant', `📦 Nenhum produto encontrado para "${termo}".\n\nCategorias disponíveis: ${cats}.`);
         return;
     }
 
     const linhas = resultados.map(p => {
-        const badge = p.status === 'Disponível' ? '✅' : p.status === 'Estoque Baixo' ? '⚠️' : '🔴';
-        return `${badge} ${p.nome}\n   Estoque: ${p.estoque} un | Preço: R$ ${p.preco_un.toFixed(2)}/un · R$ ${p.preco_cx.toFixed(2)}/cx (${p.cx})`;
+        const badge  = badgeEstoque(p.estoque_status);
+        const precos = formatarPrecosProduto(p);
+        return `${badge} ${p.nome}\n   ${precos}`;
     }).join('\n\n');
 
-    const contexto = currentMode === 'cliente' ? ` — contexto: ${selectedClient.nome}` : '';
-    addMessage('assistant', `📦 Consulta de Estoque${contexto}\n\n${linhas}\n\n${resultados.length} produto(s) encontrado(s).`);
+    const contexto = currentMode === 'cliente' ? ` — ${selectedClient.nome}` : '';
+    addMessage('assistant', `📦 Consulta de Estoque${contexto}\n\n${linhas}\n\n${resultados.length} produto(s) encontrado(s). Total no catálogo: ${produtos.length}.`);
 }
 
 function responderTabelaPrecos(lc) {
-    const contexto = currentMode === 'cliente' ? `\nCliente selecionado: ${selectedClient.nome} (preços padrão)` : '';
-    const linhas = mockProdutos.slice(0, 6).map(p =>
-        `• ${p.nome.padEnd(35)} R$ ${p.preco_un.toFixed(2)}/un · R$ ${p.preco_cx.toFixed(2)}/cx`
-    ).join('\n');
-    addMessage('assistant', `💰 Tabela de Preços${contexto}\n\n${linhas}\n\n(Exibindo 6 de ${mockProdutos.length} produtos. Especifique a categoria para filtrar.)`);
+    if (!produtos.length) {
+        addMessage('assistant', '⏳ Produtos ainda carregando. Aguarde um instante e tente novamente.');
+        return;
+    }
+    const contexto = currentMode === 'cliente' ? `\nCliente: ${selectedClient.nome} (preços padrão)` : '';
+    const amostra = produtos.slice(0, 8);
+    const linhas = amostra.map(p => `• ${p.nome}\n  ${formatarPrecosProduto(p)}`).join('\n\n');
+    addMessage('assistant', `💰 Tabela de Preços${contexto}\n\n${linhas}\n\n(Exibindo ${amostra.length} de ${produtos.length} produtos. Especifique a categoria para filtrar.)`);
 }
 
 async function responderProspeccao(cmd) {
