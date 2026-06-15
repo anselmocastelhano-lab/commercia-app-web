@@ -2588,14 +2588,15 @@ function removeInterimTranscript() {
     if (el) el.remove();
 }
 
-// ── DIAGNÓSTICO: mostra exatamente o que o microfone está captando ──
-// Visível em todas as fases. Ajuda a descobrir como o Chrome transcreve
-// "Comércia". Remover quando o reconhecimento estiver estável.
+// ── DIAGNÓSTICO: log do ciclo de vida do reconhecimento ────────────
+// IMPORTANTE: NÃO abrir getUserMedia aqui. No Android o microfone é
+// praticamente exclusivo — um segundo stream rouba o áudio do
+// SpeechRecognition e causa "nomatch". Apenas observamos os eventos.
 let voiceLogLines = [];
-let micLevel = 0;            // nível RMS ao vivo (0-100) do medidor independente
-let micDeviceLabel = '—';   // qual microfone o navegador realmente está usando
+const VOICE_DEBUG = false;   // true = mostra painel preto de diagnóstico
 
 function renderVoiceDebug() {
+    if (!VOICE_DEBUG) return;
     let el = document.getElementById('voiceDebug');
     if (!el) {
         el = document.createElement('div');
@@ -2605,57 +2606,17 @@ function renderVoiceDebug() {
             'border-radius:8px;white-space:pre-wrap;pointer-events:none;max-height:45vh;overflow:hidden;';
         document.body.appendChild(el);
     }
-    const fase  = (typeof voicePhase !== 'undefined') ? voicePhase : '?';
-    const bars  = Math.round(micLevel / 5);                 // 0-20 blocos
-    const meter = '▮'.repeat(bars) + '_'.repeat(Math.max(0, 20 - bars));
+    const fase = (typeof voicePhase !== 'undefined') ? voicePhase : '?';
     el.textContent =
         `[${fase}] tts=${ttsActive} aguard=${awaitingCommand} run=${recognitionRunning}\n` +
-        `nível mic: ${meter} ${String(Math.round(micLevel)).padStart(3)}\n` +
-        `dispositivo: ${micDeviceLabel}\n` +
         voiceLogLines.join('\n');
 }
 function voiceLog(msg) {
+    if (!VOICE_DEBUG) return;
     const t = new Date().toLocaleTimeString('pt-BR', { hour12: false });
     voiceLogLines.push(`${t} ${msg}`);
     if (voiceLogLines.length > 8) voiceLogLines.shift();
     renderVoiceDebug();
-}
-
-// Medidor de nível independente do Web Speech: prova se o microfone capta
-// QUALQUER som. Se "nível mic" fica em 0 ao falar → problema de dispositivo.
-let micMeterRAF = null, micAudioCtx = null, micStream = null;
-async function startMicMeter() {
-    if (micStream) return;
-    try {
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const track = micStream.getAudioTracks()[0];
-        micDeviceLabel = track ? (track.label || 'sem rótulo') : '—';
-        micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const src = micAudioCtx.createMediaStreamSource(micStream);
-        const analyser = micAudioCtx.createAnalyser();
-        analyser.fftSize = 512;
-        src.connect(analyser);
-        const buf = new Uint8Array(analyser.fftSize);
-        const loop = () => {
-            analyser.getByteTimeDomainData(buf);
-            let sum = 0;
-            for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
-            const rms = Math.sqrt(sum / buf.length);   // 0..1
-            micLevel = Math.min(100, rms * 400);        // escala p/ visualização
-            renderVoiceDebug();
-            micMeterRAF = requestAnimationFrame(loop);
-        };
-        loop();
-        voiceLog('medidor de mic iniciado');
-    } catch (e) {
-        voiceLog('medidor falhou: ' + (e && e.name));
-    }
-}
-function stopMicMeter() {
-    if (micMeterRAF) { cancelAnimationFrame(micMeterRAF); micMeterRAF = null; }
-    if (micAudioCtx) { try { micAudioCtx.close(); } catch(e){} micAudioCtx = null; }
-    if (micStream)  { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-    micLevel = 0;
 }
 function showDebugHeard(raw, isFinal) {
     voiceLog(`${isFinal ? 'FINAL' : 'interim'}: "${raw}"`);
@@ -2771,7 +2732,6 @@ function toggleVoice() {
     if (voicePhase === 'off') {
         setVoicePhase('standby');
         voiceLog('toggle ON — chamando start()');
-        startMicMeter();
         try {
             recognition.start();
             addMessage('assistant', '🎤 Modo voz ativado', true);
@@ -2788,7 +2748,6 @@ function toggleVoice() {
         clearAwaitingTimeout();
         setVoicePhase('off');                 // antes de stop(): impede o onend de reiniciar
         try { recognition.stop(); } catch(e) {}
-        stopMicMeter();
         addMessage('assistant', '🔇 Modo voz desativado.', true);
     }
 }
