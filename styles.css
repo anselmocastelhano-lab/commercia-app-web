@@ -1056,7 +1056,7 @@ body {
     /* ── Grid: single column ── */
     .main-container {
         grid-template-columns: 1fr;
-        height: calc(100vh - 52px);
+        height: calc(100svh - 52px);
     }
 
     /* ── Compact header ── */
@@ -1291,6 +1291,7 @@ body {
     /* ── Input area compact ── */
     .input-area {
         padding: 8px;
+        padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
         gap: 6px;
     }
     .message-input {
