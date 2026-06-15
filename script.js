@@ -2448,6 +2448,22 @@ function setVoicePhase(phase) {
     removeInterimTranscript();
 }
 
+// Remove acentos para casar a wake word em ASCII puro — imune a encoding
+// e cobre comercia / comércia / comêrcia / comércio.
+function stripAccents(s) {
+    return s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// Remove a wake word do início da frase (caso o usuário fale tudo de uma vez),
+// tolerante a acento. Se a primeira palavra não for a wake word, devolve intacto.
+function stripWakeWord(text) {
+    const m = text.match(/^\s*([^\s,.!?]+)[\s,.!?]*/);
+    if (m && /^comm?erci\w*$/i.test(stripAccents(m[1].toLowerCase()))) {
+        return text.slice(m[0].length).trim();
+    }
+    return text.trim();
+}
+
 // ── Interim transcript preview ──────────────────────────────────────
 function showInterimTranscript(text) {
     let el = document.getElementById('interimTranscript');
@@ -2465,6 +2481,24 @@ function removeInterimTranscript() {
     if (el) el.remove();
 }
 
+// ── DIAGNÓSTICO: mostra exatamente o que o microfone está captando ──
+// Visível em todas as fases. Ajuda a descobrir como o Chrome transcreve
+// "Comércia". Remover quando o reconhecimento estiver estável.
+function showDebugHeard(raw, isFinal) {
+    let el = document.getElementById('voiceDebug');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'voiceDebug';
+        el.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:9999;' +
+            'background:rgba(0,0,0,.85);color:#0ff;font:12px monospace;padding:6px 10px;' +
+            'border-radius:8px;white-space:pre-wrap;pointer-events:none;';
+        document.body.appendChild(el);
+    }
+    const fase = (typeof voicePhase !== 'undefined') ? voicePhase : '?';
+    const flag = isFinal ? 'FINAL' : 'interim';
+    el.textContent = `🎤 [${fase}] tts=${ttsActive} aguardando=${awaitingCommand}\n${flag}: "${raw}"`;
+}
+
 function setupVoiceRecognition() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
@@ -2479,12 +2513,15 @@ function setupVoiceRecognition() {
             const result     = event.results[i];
             const transcript = result[0].transcript.trim();
             const lc         = transcript.toLowerCase();
+            const norm       = stripAccents(lc);   // sem acentos, p/ casar wake word
+
+            showDebugHeard(transcript, result.isFinal);
 
             if (!awaitingCommand) {
                 // ── Fase standby: aguardando "Commercia!" com variações fonéticas ──
                 // Chrome transcreve o nome inventado de formas diversas: comercia,
-                // comércia, comércio, comercial, commercia. Casamos pelo radical.
-                const hasWakeWord = /comm?[eéê]rci/i.test(lc);
+                // comércia, comércio, comercial. Casamos pelo radical em ASCII.
+                const hasWakeWord = /comm?erci/i.test(norm);
                 if (hasWakeWord) {
                     awaitingCommand = true;
                     armAwaitingTimeout();
@@ -2495,12 +2532,12 @@ function setupVoiceRecognition() {
             } else if (!ttsActive) {
                 if (!result.isFinal) {
                     // ── Interim: mostra preview do que está sendo reconhecido ──
-                    const preview = transcript.replace(/^comm?[eéê]rci\w*[!,.]?\s*/i, '').trim();
+                    const preview = stripWakeWord(transcript);
                     if (preview.length > 0) showInterimTranscript(preview);
                 } else {
                     // ── Fase active: primeiro resultado final = comando ─────
-                    // Remove wake word (com variações fonéticas) se o usuário disse tudo na mesma frase
-                    const cmd = transcript.replace(/^comm?[eéê]rci\w*[!,.]?\s*/i, '').trim();
+                    // Remove wake word (se o usuário disse tudo na mesma frase)
+                    const cmd = stripWakeWord(transcript);
                     if (cmd.length > 1) {
                         awaitingCommand = false;
                         clearAwaitingTimeout();
