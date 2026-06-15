@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Commercia IA — MVP v1.0</title>
+    <link rel="stylesheet" href="styles.css?v=9">
+</head>
+<body>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <button class="mobile-hamburger" id="mobileHamburger" title="Carteira de Clientes">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+            </button>
+            <div class="logo">
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect fill='%23FF8C00' width='40' height='40' rx='8'/%3E%3Cpath fill='white' d='M12 14h16v2H12z M12 20h16v2H12z M12 26h10v2H12z'/%3E%3C/svg%3E" alt="Commercia IA" class="logo-icon">
+                <span class="logo-text">Commercia <span class="logo-ia">IA</span></span>
+            </div>
+            <div class="mvp-badge">MVP v1.0</div>
+            <!-- Mode Badge -->
+            <div class="mode-badge" id="modeBadge" data-mode="geral">
+                <span class="mode-badge-dot"></span>
+                <span class="mode-badge-label" id="modeBadgeLabel">MODO REP</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <!-- Output Mode Toggle -->
+            <div class="output-mode-group" id="outputModeGroup" title="Modo de saída das respostas">
+                <button class="output-mode-btn" data-mode="texto" title="Só Texto — ideal ao falar com cliente">
+                    <span class="output-mode-icon">📝</span>
+                    <span class="output-mode-label">Texto</span>
+                </button>
+                <button class="output-mode-btn active" data-mode="texto-voz" title="Texto e Voz — padrão">
+                    <span class="output-mode-icon">📝🔊</span>
+                    <span class="output-mode-label">Texto+Voz</span>
+                </button>
+                <button class="output-mode-btn" data-mode="voz" title="Só Voz — ideal ao dirigir">
+                    <span class="output-mode-icon">🔊</span>
+                    <span class="output-mode-label">Voz</span>
+                </button>
+            </div>
+            <div class="status-indicator online">
+                <span class="status-dot"></span>
+                IA Online
+            </div>
+            <div class="status-indicator active">
+                <span class="status-dot"></span>
+                API Ativa
+            </div>
+            <button class="mobile-output-toggle" id="mobileOutputToggle" title="Modo de saída">
+                <span id="mobileOutputIcon">📝🔊</span>
+            </button>
+            <button class="mobile-dashboard-btn" id="mobileDashboardBtn" title="Positivação">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+            </button>
+            <div class="user-info" id="userInfoBtn" style="cursor:pointer;" title="Configurações do representante">
+                <div class="user-avatar">CR</div>
+                <span class="user-name">Carlos Rep.</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Modal Perfil Rep -->
+    <div class="rep-modal-overlay" id="repModalOverlay">
+        <div class="rep-modal">
+            <div class="rep-modal-header">
+                <span class="rep-modal-title">Perfil do Representante</span>
+                <button class="rep-modal-close" id="repModalClose">&times;</button>
+            </div>
+            <div class="rep-modal-body">
+                <label class="rep-modal-label">Contato (WhatsApp)</label>
+                <input type="text" class="rep-modal-input" id="repTelefone" placeholder="51999999999">
+                <label class="rep-modal-label">E-mail Google</label>
+                <input type="email" class="rep-modal-input" id="repEmail" placeholder="email@gmail.com">
+            </div>
+            <div class="rep-modal-footer">
+                <button class="rep-modal-save" id="repModalSave" title="Salvar">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M17 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V7l-4-4zm-5 16a3 3 0 110-6 3 3 0 010 6zm3-10H5V5h10v4z"/></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Drawer Overlay (mobile) -->
+    <div class="drawer-overlay" id="drawerOverlay"></div>
+
+    <!-- Output Mode Dropdown (mobile) -->
+    <div class="mobile-output-dropdown" id="mobileOutputDropdown">
+        <button class="output-mode-btn mobile-output-opt" data-mode="texto">
+            <span class="output-mode-icon">📝</span>
+            <span class="output-mode-label">Só Texto</span>
+        </button>
+        <button class="output-mode-btn mobile-output-opt active" data-mode="texto-voz">
+            <span class="output-mode-icon">📝🔊</span>
+            <span class="output-mode-label">Texto + Voz</span>
+        </button>
+        <button class="output-mode-btn mobile-output-opt" data-mode="voz">
+            <span class="output-mode-icon">🔊</span>
+            <span class="output-mode-label">Só Voz</span>
+        </button>
+    </div>
+
+    <!-- Main Container -->
+    <div class="main-container">
+
+        <!-- Sidebar (Carteira de Clientes) -->
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-title" id="sidebarTitle">CARTEIRA DE CLIENTES</div>
+                <div class="client-counter" id="clientCounter">
+                    <span class="client-counter-value" id="clientCounterValue">5</span>
+                    <span class="client-counter-label" id="clientCounterLabel">CLIENTES</span>
+                </div>
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="Buscar cliente..." class="search-input">
+                </div>
+                <div class="client-list" id="clientList">
+                    <!-- Clientes renderizados via JS -->
+                </div>
+            </div>
+            <div class="sidebar-section sidebar-actions">
+                <button class="btn-modo-lead" id="btnModoLead">
+                    <span>🎯</span> Modo Lead
+                </button>
+                <button class="btn-modo-lead" id="btnModoCliente" style="display:none;">
+                    <span>👤</span> Modo Cliente
+                </button>
+                <button class="btn-modo-geral" id="btnModoGeral" style="display:none;">
+                    <span>↩</span> Modo REP
+                </button>
+            </div>
+        </aside>
+
+        <!-- Chat Area -->
+        <main class="chat-area">
+
+            <!-- Context Header (muda por modo) -->
+            <div class="context-header" id="contextHeader">
+                <!-- preenchido via JS -->
+            </div>
+
+            <!-- Mobile Actions Trigger -->
+            <button class="mobile-actions-trigger" id="mobileActionsTrigger">
+                <span>⚡</span> Ações
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+            </button>
+
+            <!-- Action Bar (muda por modo) -->
+            <div class="action-bar" id="actionBar">
+                <!-- botões renderizados via JS -->
+            </div>
+
+            <!-- Messages -->
+            <div class="messages" id="messages"></div>
+
+            <!-- Input Area -->
+            <div class="input-area">
+                <button class="voice-btn" id="voiceBtn" title="Ativar voz — diga 'Commercia!'">
+                    <svg class="mic-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 14a3 3 0 003-3V5a3 3 0 00-6 0v6a3 3 0 003 3z" fill="currentColor"/>
+                        <path d="M19 11a1 1 0 00-2 0 5 5 0 01-10 0 1 1 0 00-2 0 7 7 0 006 6.93V20H9a1 1 0 000 2h6a1 1 0 000-2h-2v-2.07A7 7 0 0019 11z" fill="currentColor"/>
+                    </svg>
+                </button>
+                <input
+                    type="text"
+                    id="messageInput"
+                    class="message-input"
+                    placeholder="Fale 'Commercia!' ou escreva seu comando..."
+                >
+                <button class="send-btn" id="sendBtn">➤</button>
+            </div>
+
+        </main>
+
+        <!-- Dashboard Panel -->
+        <aside class="dashboard">
+            <div class="dashboard-header">POSITIVAÇÃO</div>
+
+            <div class="stat-card">
+                <div class="stat-value" id="visitasHojeCount">0</div>
+                <div class="stat-label">VISITAS HOJE</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">3</div>
+                <div class="stat-label">PEDIDOS</div>
+            </div>
+            <div class="stat-card highlight">
+                <div class="stat-value">R$ 18K</div>
+                <div class="stat-label">HOJE</div>
+            </div>
+
+            <div class="dashboard-section">
+                <div class="section-title">AGENDA DE HOJE</div>
+                <div class="agenda-item"><div class="agenda-time">08:30</div><div class="agenda-text">Restaurante Sabor do Sul</div></div>
+                <div class="agenda-item"><div class="agenda-time">10:00</div><div class="agenda-text">Churrascaria Gaúcha</div></div>
+                <div class="agenda-item"><div class="agenda-time">13:30</div><div class="agenda-text">Pizzaria Don Carlo</div></div>
+                <div class="agenda-item"><div class="agenda-time">15:30</div><div class="agenda-text">Buffet Sabores</div></div>
+            </div>
+
+            <div class="dashboard-section" id="agendaAmanha">
+                <div class="section-title">AGENDA DE AMANHÃ</div>
+                <div class="agenda-item"><div class="agenda-text" style="color:var(--gray-400)">Carregando...</div></div>
+            </div>
+
+            <div class="dashboard-section" style="border-top:none;padding-top:0;">
+                <a class="gcal-link" id="gcalLink" href="https://calendar.google.com" target="_blank" rel="noopener">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V6a2 2 0 00-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2z"/></svg>
+                    Abrir Google Calendar
+                </a>
+            </div>
+
+        </aside>
+
+    </div>
+
+    <script src="script.js?t=20260516_v34_msg_engine"></script>
+</body>
+</html>
